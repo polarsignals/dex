@@ -325,10 +325,20 @@ func newServer(ctx context.Context, c Config, rotationStrategy rotationStrategy)
 		return nil, errors.New("server: no connectors specified")
 	}
 
+	var failedCount int
 	for _, conn := range storageConnectors {
 		if _, err := s.OpenConnector(conn); err != nil {
-			return nil, fmt.Errorf("server: Failed to open connector %s: %v", conn.ID, err)
+			failedCount++
+			s.logger.Error("server: Failed to open connector", "id", conn.ID, "err", err)
+
+			// Continue to open other connectors even if one fails.
+			// This allows the server to start even if some connectors are misconfigured.
+			continue
 		}
+	}
+
+	if failedCount == len(storageConnectors) {
+		return nil, fmt.Errorf("server: failed to open all connectors (%d/%d)", failedCount, len(storageConnectors))
 	}
 
 	instrumentHandler := func(_ string, handler http.Handler) http.HandlerFunc {

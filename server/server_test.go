@@ -1816,3 +1816,139 @@ func TestHeaders(t *testing.T) {
 
 	require.Equal(t, "max-age=31536000; includeSubDomains", resp.Header.Get("Strict-Transport-Security"))
 }
+
+func TestConnectorFailureHandling(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	tests := []struct {
+		name             string
+		connectors       []storage.Connector
+		wantErr          bool
+		wantErrContains  string
+		expectConnectors []string // IDs of connectors that should be loaded successfully
+	}{
+		{
+			name: "all connectors succeed",
+			connectors: []storage.Connector{
+				{
+					ID:   "mock1",
+					Type: "mockCallback",
+					Name: "Mock1",
+				},
+				{
+					ID:   "mock2",
+					Type: "mockCallback",
+					Name: "Mock2",
+				},
+			},
+			wantErr:          false,
+			expectConnectors: []string{"mock1", "mock2"},
+		},
+		{
+			name: "partial connector failure",
+			connectors: []storage.Connector{
+				{
+					ID:   "mock-good",
+					Type: "mockCallback",
+					Name: "Good Mock",
+				},
+				{
+					ID:   "bad-connector",
+					Type: "nonexistent",
+					Name: "Bad Connector",
+				},
+				{
+					ID:   "mock-good2",
+					Type: "mockCallback",
+					Name: "Good Mock 2",
+				},
+			},
+			wantErr:          false,
+			expectConnectors: []string{"mock-good", "mock-good2"},
+		},
+		{
+			name: "all connectors fail",
+			connectors: []storage.Connector{
+				{
+					ID:   "bad1",
+					Type: "nonexistent1",
+					Name: "Bad 1",
+				},
+				{
+					ID:   "bad2",
+					Type: "nonexistent2",
+					Name: "Bad 2",
+				},
+			},
+			wantErr:         true,
+			wantErrContains: "failed to open all connectors (2/2)",
+		},
+		{
+			name:            "no connectors",
+			connectors:      []storage.Connector{},
+			wantErr:         true,
+			wantErrContains: "no connectors specified",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			config := Config{
+				Issuer:  "http://localhost",
+				Storage: memory.New(logger),
+				Web: WebConfig{
+					Dir: "../web",
+				},
+				Logger:             logger,
+				PrometheusRegistry: prometheus.NewRegistry(),
+				HealthChecker:      gosundheit.New(),
+			}
+
+			// Create connectors in storage
+			for _, conn := range tc.connectors {
+				if err := config.Storage.CreateConnector(ctx, conn); err != nil {
+					t.Fatalf("failed to create connector: %v", err)
+				}
+			}
+
+			server, err := newServer(ctx, config, staticRotationStrategy(testKey))
+
+			if tc.wantErr {
+				if err == nil {
+					t.Errorf("expected error but got none")
+				} else if tc.wantErrContains != "" && !strings.Contains(err.Error(), tc.wantErrContains) {
+					t.Errorf("expected error containing %q, got %q", tc.wantErrContains, err.Error())
+				}
+			} else {
+				if err != nil {
+					t.Errorf("unexpected error: %v", err)
+				} else {
+					// Verify expected connectors are loaded
+					for _, id := range tc.expectConnectors {
+						if _, exists := server.connectors[id]; !exists {
+							t.Errorf("expected connector %q to be loaded", id)
+						}
+					}
+
+					// Verify failed connectors are not loaded
+					for _, conn := range tc.connectors {
+						_, shouldExist := false, false
+						for _, expectedID := range tc.expectConnectors {
+							if conn.ID == expectedID {
+								shouldExist = true
+								break
+							}
+						}
+						_, exists := server.connectors[conn.ID]
+						if shouldExist && !exists {
+							t.Errorf("connector %q should have been loaded but wasn't", conn.ID)
+						} else if !shouldExist && exists {
+							t.Errorf("connector %q should not have been loaded but was", conn.ID)
+						}
+					}
+				}
+			}
+		})
+	}
+}
