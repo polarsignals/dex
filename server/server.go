@@ -119,6 +119,10 @@ type Config struct {
 	PrometheusRegistry *prometheus.Registry
 
 	HealthChecker gosundheit.Health
+
+	// If enabled, the server will continue starting even if some connectors fail to initialize.
+	// This allows the server to operate with a subset of connectors if some are misconfigured.
+	ContinueOnConnectorFailure bool
 }
 
 // WebConfig holds the server's frontend templates and asset configuration.
@@ -329,15 +333,15 @@ func newServer(ctx context.Context, c Config, rotationStrategy rotationStrategy)
 	for _, conn := range storageConnectors {
 		if _, err := s.OpenConnector(conn); err != nil {
 			failedCount++
-			s.logger.Error("server: Failed to open connector", "id", conn.ID, "err", err)
-
-			// Continue to open other connectors even if one fails.
-			// This allows the server to start even if some connectors are misconfigured.
-			continue
+			if c.ContinueOnConnectorFailure {
+				s.logger.Error("server: Failed to open connector", "id", conn.ID, "err", err)
+				continue
+			}
+			return nil, fmt.Errorf("server: Failed to open connector %s: %v", conn.ID, err)
 		}
 	}
 
-	if failedCount == len(storageConnectors) {
+	if c.ContinueOnConnectorFailure && failedCount == len(storageConnectors) {
 		return nil, fmt.Errorf("server: failed to open all connectors (%d/%d)", failedCount, len(storageConnectors))
 	}
 

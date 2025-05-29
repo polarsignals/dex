@@ -1822,14 +1822,15 @@ func TestConnectorFailureHandling(t *testing.T) {
 	defer cancel()
 
 	tests := []struct {
-		name             string
-		connectors       []storage.Connector
-		wantErr          bool
-		wantErrContains  string
-		expectConnectors []string // IDs of connectors that should be loaded successfully
+		name                       string
+		connectors                 []storage.Connector
+		continueOnConnectorFailure bool
+		wantErr                    bool
+		wantErrContains            string
+		expectConnectors           []string // IDs of connectors that should be loaded successfully
 	}{
 		{
-			name: "all connectors succeed",
+			name: "all connectors succeed with flag enabled",
 			connectors: []storage.Connector{
 				{
 					ID:   "mock1",
@@ -1842,11 +1843,30 @@ func TestConnectorFailureHandling(t *testing.T) {
 					Name: "Mock2",
 				},
 			},
-			wantErr:          false,
-			expectConnectors: []string{"mock1", "mock2"},
+			continueOnConnectorFailure: true,
+			wantErr:                    false,
+			expectConnectors:           []string{"mock1", "mock2"},
 		},
 		{
-			name: "partial connector failure",
+			name: "all connectors succeed with flag disabled",
+			connectors: []storage.Connector{
+				{
+					ID:   "mock1",
+					Type: "mockCallback",
+					Name: "Mock1",
+				},
+				{
+					ID:   "mock2",
+					Type: "mockCallback",
+					Name: "Mock2",
+				},
+			},
+			continueOnConnectorFailure: false,
+			wantErr:                    false,
+			expectConnectors:           []string{"mock1", "mock2"},
+		},
+		{
+			name: "partial connector failure with flag enabled",
 			connectors: []storage.Connector{
 				{
 					ID:   "mock-good",
@@ -1864,11 +1884,36 @@ func TestConnectorFailureHandling(t *testing.T) {
 					Name: "Good Mock 2",
 				},
 			},
-			wantErr:          false,
-			expectConnectors: []string{"mock-good", "mock-good2"},
+			continueOnConnectorFailure: true,
+			wantErr:                    false,
+			expectConnectors:           []string{"mock-good", "mock-good2"},
 		},
 		{
-			name: "all connectors fail",
+			name: "partial connector failure with flag disabled",
+			connectors: []storage.Connector{
+				{
+					ID:   "mock-good",
+					Type: "mockCallback",
+					Name: "Good Mock",
+				},
+				{
+					ID:   "bad-connector",
+					Type: "nonexistent",
+					Name: "Bad Connector",
+				},
+				{
+					ID:   "mock-good2",
+					Type: "mockCallback",
+					Name: "Good Mock 2",
+				},
+			},
+			continueOnConnectorFailure: false,
+			wantErr:                    true,
+			wantErrContains:            "Failed to open connector bad-connector",
+			expectConnectors:           []string{}, // Server creation should fail
+		},
+		{
+			name: "all connectors fail with flag enabled",
 			connectors: []storage.Connector{
 				{
 					ID:   "bad1",
@@ -1881,14 +1926,34 @@ func TestConnectorFailureHandling(t *testing.T) {
 					Name: "Bad 2",
 				},
 			},
-			wantErr:         true,
-			wantErrContains: "failed to open all connectors (2/2)",
+			continueOnConnectorFailure: true,
+			wantErr:                    true,
+			wantErrContains:            "failed to open all connectors (2/2)",
 		},
 		{
-			name:            "no connectors",
-			connectors:      []storage.Connector{},
-			wantErr:         true,
-			wantErrContains: "no connectors specified",
+			name: "all connectors fail with flag disabled",
+			connectors: []storage.Connector{
+				{
+					ID:   "bad1",
+					Type: "nonexistent1",
+					Name: "Bad 1",
+				},
+				{
+					ID:   "bad2",
+					Type: "nonexistent2",
+					Name: "Bad 2",
+				},
+			},
+			continueOnConnectorFailure: false,
+			wantErr:                    true,
+			wantErrContains:            "Failed to open connector",
+		},
+		{
+			name:                       "no connectors",
+			connectors:                 []storage.Connector{},
+			continueOnConnectorFailure: true,
+			wantErr:                    true,
+			wantErrContains:            "no connectors specified",
 		},
 	}
 
@@ -1900,9 +1965,10 @@ func TestConnectorFailureHandling(t *testing.T) {
 				Web: WebConfig{
 					Dir: "../web",
 				},
-				Logger:             logger,
-				PrometheusRegistry: prometheus.NewRegistry(),
-				HealthChecker:      gosundheit.New(),
+				Logger:                     logger,
+				PrometheusRegistry:         prometheus.NewRegistry(),
+				HealthChecker:              gosundheit.New(),
+				ContinueOnConnectorFailure: tc.continueOnConnectorFailure,
 			}
 
 			// Create connectors in storage
