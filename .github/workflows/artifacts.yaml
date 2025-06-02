@@ -175,13 +175,13 @@ jobs:
       #     subject-digest: ${{ steps.build.outputs.digest }}
       #     push-to-registry: true
 
-      - name: Generate build provenance attestation
-        uses: actions/attest-build-provenance@db473fddc028af60658334401dc6fa3ffd8669fd # v2.3.0
-        with:
-          subject-name: ghcr.io/dexidp/dex
-          subject-digest: ${{ steps.build.outputs.digest }}
-          push-to-registry: true
-        if: inputs.publish
+      # - name: Generate build provenance attestation
+      #   uses: actions/attest-build-provenance@db473fddc028af60658334401dc6fa3ffd8669fd # v2.3.0
+      #   with:
+      #     subject-name: ghcr.io/dexidp/dex
+      #     subject-digest: ${{ steps.build.outputs.digest }}
+      #     push-to-registry: true
+      #   if: inputs.publish
 
       ## Use cache for the trivy-db to avoid the TOOMANYREQUESTS error https://github.com/aquasecurity/trivy-action/pull/397
       ## To avoid the trivy-db becoming outdated, we save the cache for one day
